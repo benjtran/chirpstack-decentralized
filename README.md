@@ -1,0 +1,1 @@
+git clone https://github.com/chirpstack/chirpstack-docker
