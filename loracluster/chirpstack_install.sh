@@ -19,32 +19,42 @@ apt install --yes chirpstack chirpstack-gateway-bridge \
     postgresql postgresql-client postgresql-contrib \
     mosquitto mosquitto-clients redis
 
-echo "Initialize PostgreSQL for ChirpStack
-su -l postgres -c "/usr/bin/initdb --pgdata='/var/lib/postgresql/data' --auth='trust'"
+echo "Initialize PostgreSQL for ChirpStack"
+POSTGRES_DATA_DIR="/var/lib/postgresql/17/main"
+
+if [ -d "$POSTGRES_DATA_DIR" ] && [ "$(ls -A $POSTGRES_DATA_DIR)" ]; then
+    echo "PostgreSQL data directory already initialized at $POSTGRES_DATA_DIR"
+else
+    echo "Initializing PostgreSQL database cluster..."
+    su -l postgres -c "initdb --pgdata='$POSTGRES_DATA_DIR' --auth='trust'"
+fi
+
+echo "Enabling and starting PostgreSQL service..."
 systemctl enable postgresql --now
 
-su - postgres -c "psql -c \"CREATE ROLE chirpstack WITH LOGIN PASSWORD 'chirpstack';\""
-su - postgres -c "psql -c \"CREATE DATABASE chirpstack WITH OWNER chirpstack;\""
-su - postgres -c "psql -d chirpstack -c \"CREATE EXTENSION pg_trgm;\""
+# Create role if not exists
+su - postgres -c "psql -tc \"SELECT 1 FROM pg_roles WHERE rolname='chirpstack'\" | grep -q 1 || psql -c \"CREATE ROLE chirpstack WITH LOGIN PASSWORD 'chirpstack';\""
+
+# Create database if not exists
+su - postgres -c "psql -tc \"SELECT 1 FROM pg_database WHERE datname='chirpstack'\" | grep -q 1 || psql -c \"CREATE DATABASE chirpstack WITH OWNER chirpstack;\""
+
+# Create extension if not exists
+su - postgres -c "psql -d chirpstack -c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\""
 
 echo "Enable ChirpStack"
 systemctl enable chirpstack --now
 
 sleep 2
 
-# Optional: Pre-populate a dummy gateway entry (replace with actual EUI64 if needed)
-# EUI64="0000000000000001"
-# su - postgres -c "psql -d chirpstack -c \"insert into gateway (gateway_id, tenant_id, created_at, updated_at, last_seen_at, name, description, latitude, longitude, altitude, stats_interval_secs, tls_certificate, tags, properties) values (bytea '\x$EUI64', (select id from tenant limit 1), now(), now(), null, 'local gateway', 'self', 0.0, 0.0, 0.0, 30, null, '{}', '{}');\""
-
 echo "Setup Gateway Bridge"
 
-# Edit /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml if needed
 systemctl enable chirpstack-gateway-bridge --now
 
 echo "Configure Mosquitto MQTT Broker"
 
 mkdir -p /etc/mosquitto/conf.d/
 
+grep -qxF "include_dir /etc/mosquitto/conf.d/" /etc/mosquitto/mosquitto.conf || \
 echo "include_dir /etc/mosquitto/conf.d/" | tee -a /etc/mosquitto/mosquitto.conf
 
 cat > /etc/mosquitto/conf.d/local.conf << EOF
@@ -55,3 +65,4 @@ EOF
 systemctl enable mosquitto --now
 
 echo "SETUP COMPLETE"
+exit 0

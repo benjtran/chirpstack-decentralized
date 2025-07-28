@@ -15,6 +15,7 @@ def connect_ssh(host, username, password) -> paramiko.SSHClient | None:
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy()) # Automatically trust new hosts
         client.connect(hostname=host, username=username, password=password, timeout=5)
+        print("Success!")
         return client
     except socket.timeout:
         print("Connection timed out: The host did not respond")
@@ -32,7 +33,7 @@ def connect_all_nodes() -> list:
             username = config[section]["username"]
             password = config[section]["password"]
             client = connect_ssh(host, username, password)
-            client_result = [host, client]
+            client_result = [host, client, password]
             connection_results.append(client_result)
     return connection_results
 
@@ -50,30 +51,39 @@ def print_connect_results(results) -> None:
             failed+=1
     print(f"{success}/{success + failed} successfully connected")
 
-def install_components(connection_results) -> list:
+def install_components(connection_results):
     for result in connection_results:
         host = result[0]
         client = result[1]
+        password = result[2]
         if client:
-            local_script_path = "chirpstack_install.sh"
+            chan = client.invoke_shell()
+
+            local_script_path = "loracluster/chirpstack_install.sh"
             remote_script_path = "/tmp/chirpstack_install.sh"
 
             # Uploading a sh script to a remote server for gw to use
-            sftp = ssh.open_sftp()
+            sftp = client.open_sftp()
             sftp.put(local_script_path, remote_script_path)
             sftp.chmod(remote_script_path, 0o755)  # make script executable
             sftp.close()
 
-            stdin, stdout, stderr = client.exec_command(f"bash {remote_script_path}")
+            chan.send(f"sudo bash {remote_script_path}\n")
 
-            # Print stdout and stderr
-            print("STDOUT:")
-            for line in stdout:
-                print(line, end='')
+            while True:
+                if chan.recv_ready():
+                    output = chan.recv(1024).decode()
+                    print(output)
 
-            print("\nSTDERR:")
-            for line in stderr:
-                print(line, end='')
+                    if "password" in output.lower():
+                        chan.send(password + '\n')
+
+                    if "setup complete" in output.lower():
+                        print(f"Finished installing components to {host}")
+                        break
+                
+            chan.close()
+            client.close()
  
 def main() -> int:
     """
@@ -89,7 +99,8 @@ def main() -> int:
     if continue_status == "N":
         return 0
 
-    print("Running future scripts...")
+    print("Testing component installation")
+    install_components(connection_results)
     return 0
 
 if __name__ == "__main__":
