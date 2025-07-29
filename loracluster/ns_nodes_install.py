@@ -9,57 +9,98 @@ import socket
 config = configparser.ConfigParser()
 config.read('loracluster/config.ini')
 
-def connect_ssh(host, username, password) -> bool:
+def connect_ssh(host, username, password) -> paramiko.SSHClient | None:
     try:
+        print("Attempting connection to " + host)
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy()) # Automatically trust new hosts
         client.connect(hostname=host, username=username, password=password, timeout=5)
-        client.close()
-        return True
+        print("Success!")
+        return client
     except socket.timeout:
         print("Connection timed out: The host did not respond")
-        return False
     except socket.gaierror:
         print("Get address info error: Invalid IP")
-        return False
     except paramiko.AuthenticationException:
         print("Authentication failed: Wrong username or password.")
-        return False
+    return None
 
 def connect_all_nodes() -> list:
-    results = []
+    connection_results = []
     for section in config.sections():
         if section != 'settings':
-            gw_connection_status = [section, connect_ssh(config[section]["host"], config[section]["username"], config[section]["password"])]
-            results.append(gw_connection_status)
-    return results
+            host = config[section]["host"]
+            username = config[section]["username"]
+            password = config[section]["password"]
+            client = connect_ssh(host, username, password)
+            client_result = [host, client, password]
+            connection_results.append(client_result)
+    return connection_results
 
 def print_connect_results(results) -> None:
     success = 0
     failed = 0
     for result in results:
-        if result[1]:
-            print(result[0] + " successfully connected")
+        host = result[0]
+        client = result[1]
+        if client:
+            print(host + " successfully connected")
             success+=1
         else:
-            print(result[0] + " failed to connect")
+            print(host + " failed to connect")
             failed+=1
     print(f"{success}/{success + failed} successfully connected")
 
-    
+def install_components(connection_results):
+    for result in connection_results:
+        host = result[0]
+        client = result[1]
+        password = result[2]
+        if client:
+            chan = client.invoke_shell()
+
+            local_script_path = "loracluster/chirpstack_install.sh"
+            remote_script_path = "/tmp/chirpstack_install.sh"
+
+            # Uploading a sh script to a remote server for gw to use
+            sftp = client.open_sftp()
+            sftp.put(local_script_path, remote_script_path)
+            sftp.chmod(remote_script_path, 0o755)  # make script executable
+            sftp.close()
+
+            chan.send(f"sudo bash {remote_script_path}\n")
+
+            while True:
+                if chan.recv_ready():
+                    output = chan.recv(1024).decode()
+                    print(output)
+
+                    if "password" in output.lower():
+                        chan.send(password + '\n')
+
+                    if "setup complete" in output.lower():
+                        print(f"Finished installing components to {host}")
+                        break
+                
+            chan.close()
+            client.close()
  
 def main() -> int:
     """
     Main Function.
     """
     print("Testing connect SSH")
-    connect_ssh('102.199.1.20', 'ben', 'password123')
+    client = connect_ssh('102.199.1.20', 'ben', 'password123')
+
     print("Testing looping nodes")
-    print_connect_results(connect_all_nodes())
+    connection_results = connect_all_nodes()
+    print_connect_results(connection_results)
     continue_status = input("Would you like to continue? (Y/N)")
     if continue_status == "N":
         return 0
-    print("Running future scripts...")
+
+    print("Testing component installation")
+    install_components(connection_results)
     return 0
 
 if __name__ == "__main__":
