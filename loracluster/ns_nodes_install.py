@@ -32,8 +32,9 @@ def connect_all_nodes() -> list:
             host = config[section]["host"]
             username = config[section]["username"]
             password = config[section]["password"]
+            platform = config[section]["deveui"]
             client = connect_ssh(host, username, password)
-            client_result = [host, client, password]
+            client_result = [host, client, password, platform]
             connection_results.append(client_result)
     return connection_results
 
@@ -56,6 +57,7 @@ def install_components(connection_results):
         host = result[0]
         client = result[1]
         password = result[2]
+        platform = result[3]
         if client:
             chan = client.invoke_shell()
 
@@ -68,7 +70,7 @@ def install_components(connection_results):
             sftp.chmod(remote_script_path, 0o755)  # make script executable
             sftp.close()
 
-            chan.send(f"sudo bash {remote_script_path}\n")
+            chan.send(f"sudo bash {remote_script_path} {platform}\n")
 
             while True:
                 if chan.recv_ready():
