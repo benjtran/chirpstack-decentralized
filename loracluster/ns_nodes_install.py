@@ -13,7 +13,7 @@ def connect_ssh(host, username, password) -> paramiko.SSHClient | None:
     try:
         print("Attempting connection to " + host)
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy()) # Automatically trust new hosts
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Automatically trust new hosts
         client.connect(hostname=host, username=username, password=password, timeout=5)
         print("Success!")
         return client
@@ -23,6 +23,8 @@ def connect_ssh(host, username, password) -> paramiko.SSHClient | None:
         print("Get address info error: Invalid IP")
     except paramiko.AuthenticationException:
         print("Authentication failed: Wrong username or password.")
+    except paramiko.ssh_exception.NoValidConnectionsError as e:
+        print(f"SSH connection failed: {e}")
     return None
 
 def connect_all_nodes() -> list:
@@ -64,12 +66,27 @@ def install_components(connection_results):
             local_script_path = "loracluster/chirpstack_install.sh"
             remote_script_path = "/tmp/chirpstack_install.sh"
 
-            # Uploading a sh script to a remote server for gw to use
+            # Fix line endings before upload
+            with open(local_script_path, "rb") as f:
+                content = f.read().replace(b"\r\n", b"\n")
+            with open(local_script_path, "wb") as f:
+                f.write(content)
+
+            # Upload script
             sftp = client.open_sftp()
             sftp.put(local_script_path, remote_script_path)
-            sftp.chmod(remote_script_path, 0o755)  # make script executable
+            sftp.chmod(remote_script_path, 0o755)
             sftp.close()
 
+            # Invoke shell and prepare for remote execution
+            chan = client.invoke_shell()
+            chan.recv(1024)
+
+            # Optional: Convert again just in case
+            chan.send(f"dos2unix {remote_script_path}\n")
+            chan.recv(1024)
+
+            # Run script
             chan.send(f"sudo bash {remote_script_path} {platform}\n")
 
             while True:
