@@ -1,7 +1,5 @@
 #!/bin/bash
-set -e
-
-
+set -euo pipefail
 
 echo "Add ChirpStack APT Repository"
 
@@ -15,24 +13,29 @@ curl --fail "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x1ce2afd36db
 
 sudo apt update
 
-
-
 echo "Install Required Packages"
 sudo apt install --yes chirpstack chirpstack-gateway-bridge \
     postgresql postgresql-client postgresql-contrib \
     mosquitto mosquitto-clients redis \
-    git build-essential cmake libpthread-stubs0-dev
-
-
+    git build-essential cmake libpthread-stubs0-dev dos2unix
 
 echo "Initialize PostgreSQL for ChirpStack"
-POSTGRES_DATA_DIR="/var/lib/postgresql/17/main"
 
-if [ -d "$POSTGRES_DATA_DIR" ] && [ "$(ls -A $POSTGRES_DATA_DIR)" ]; then
+# Find installed PostgreSQL version by checking initdb paths
+PG_VERSION=$(ls /usr/lib/postgresql | grep -E '^[0-9]+' | sort -V | tail -1)
+
+if [ -z "$PG_VERSION" ]; then
+    echo "PostgreSQL not found. Please install PostgreSQL before running this script."
+    exit 1
+fi
+
+POSTGRES_DATA_DIR="/var/lib/postgresql/${PG_VERSION}/main"
+
+if [ -d "$POSTGRES_DATA_DIR" ] && [ "$(ls -A "$POSTGRES_DATA_DIR")" ]; then
     echo "PostgreSQL data directory already initialized at $POSTGRES_DATA_DIR"
 else
     echo "Initializing PostgreSQL database cluster..."
-    su -l postgres -c "initdb --pgdata='$POSTGRES_DATA_DIR' --auth='trust'"
+    su -l postgres -c "/usr/lib/postgresql/${PG_VERSION}/bin/initdb --pgdata='$POSTGRES_DATA_DIR' --auth='trust'"
 fi
 
 echo "Enabling and starting PostgreSQL service..."
@@ -47,18 +50,11 @@ su - postgres -c "psql -tc \"SELECT 1 FROM pg_database WHERE datname='chirpstack
 # Create extension if not exists
 su - postgres -c "psql -d chirpstack -c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\""
 
-
-
 echo "Enable ChirpStack"
 systemctl enable chirpstack --now
 sleep 2
 
-
-
 echo "Setup Gateway Bridge"
-
-# Basic Station Gateway Bridge config
-echo "Creating Basic Station config for Gateway Bridge..."
 
 mkdir -p /etc/chirpstack-gateway-bridge/
 
@@ -73,7 +69,6 @@ servers=["tcp://localhost:1883"]
 bind="127.0.0.1:3001"
 EOF
 
-# Override systemd service to use this config
 mkdir -p /etc/systemd/system/chirpstack-gateway-bridge.service.d/
 
 cat > /etc/systemd/system/chirpstack-gateway-bridge.service.d/override.conf << EOF
@@ -85,8 +80,6 @@ EOF
 systemctl daemon-reexec
 systemctl daemon-reload
 systemctl enable chirpstack-gateway-bridge --now
-
-
 
 echo "Configure Mosquitto MQTT Broker"
 
@@ -102,17 +95,13 @@ EOF
 
 systemctl enable mosquitto --now
 
-
-
 # TO DO
 echo "Setup Redundant Agent"
-
-
 
 echo "Setup Basic Station"
 
 PLATFORM="$1"
-CHIRPSTACK_HOST="127.0.0.1"  # Replace if needed
+CHIRPSTACK_HOST="127.0.0.1"
 CHIRPSTACK_PORT="3001"
 REGION="US915"
 BUILD_DIR="build-${PLATFORM}-std"
@@ -133,7 +122,7 @@ echo "Building for platform: $PLATFORM"
 CC=gcc AR=ar LD=ld make platform=$PLATFORM
 
 echo "Fixing permissions on build directory..."
-sudo chown -R $(logname):$(logname) "$BASICSTATION_DIR/$BUILD_DIR"
+sudo chown -R "$(logname):$(logname)" "$BASICSTATION_DIR/$BUILD_DIR"
 
 cd "$BASICSTATION_DIR/$BUILD_DIR/bin"
 
@@ -152,13 +141,10 @@ cat > station.conf <<EOF
 }
 EOF
 
-# Remove any TLS files
 rm -f tc.trust tc.key tc.crt tc.crl
 
 echo "Starting Basic Station..."
 ./station &
-
-
 
 echo "SETUP COMPLETE"
 exit 0
