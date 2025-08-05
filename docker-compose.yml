@@ -1,0 +1,44 @@
+version: '3.9'
+
+services:
+  mosquitto1:
+    image: eclipse-mosquitto
+    container_name: mosquitto1
+    ports:
+      - "1884:1884"
+    volumes:
+      - ./mqtt-brokers/broker1/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - loranet
+
+  mosquitto2:
+    image: eclipse-mosquitto
+    container_name: mosquitto2
+    ports:
+      - "1885:1885"
+    volumes:
+      - ./mqtt-brokers/broker2/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - loranet
+
+  mosquitto3:
+    image: eclipse-mosquitto
+    container_name: mosquitto3
+    ports:
+      - "1886:1886"
+    volumes:
+      - ./mqtt-brokers/broker3/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - loranet
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - loranet
+
+networks:
+  loranet:
+    driver: bridge

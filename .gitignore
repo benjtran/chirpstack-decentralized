@@ -48,4 +48,10 @@ Thumbs.db
 *.mov
 *.wmv
 
-chirpstack-docker/
+
+__pycache__/
+*.pyc
+.env
+*.log
+
+chirpstack-docker/*
