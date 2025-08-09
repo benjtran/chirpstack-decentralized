@@ -2,30 +2,36 @@ version: '3.9'
 
 services:
   mosquitto1:
-    image: eclipse-mosquitto
+    build: .
+    image: mosquitto-ssh  
     container_name: mosquitto1
     ports:
-      - "1884:1884"
+      - "1884:1883"
+      - "2221:22"     # SSH for 1
     volumes:
       - ./mqtt-brokers/broker1/mosquitto.conf:/mosquitto/config/mosquitto.conf
     networks:
       - loranet
 
   mosquitto2:
-    image: eclipse-mosquitto
+    build: .
+    image: mosquitto-ssh
     container_name: mosquitto2
     ports:
-      - "1885:1885"
+      - "1885:1883"
+      - "2222:22"     # SSH for 2
     volumes:
       - ./mqtt-brokers/broker2/mosquitto.conf:/mosquitto/config/mosquitto.conf
     networks:
       - loranet
 
   mosquitto3:
-    image: eclipse-mosquitto
+    build: .
+    image: mosquitto-ssh
     container_name: mosquitto3
     ports:
-      - "1886:1886"
+      - "1886:1883"
+      - "2223:22"     # SSH for 3
     volumes:
       - ./mqtt-brokers/broker3/mosquitto.conf:/mosquitto/config/mosquitto.conf
     networks:
