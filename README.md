@@ -44,7 +44,9 @@ Make sure you have Python 3.7+ installed on your system.
    docker-compose up -d
    ```
 
-2. **Install decentralized nodes**:
+2. **Configure the installation**: The `loracluster/config.ini` file includes the configuration used to install the nodes. Make sure to review and modify this configuration file according to your network requirements before proceeding.
+
+3. **Install decentralized nodes**:
    ```bash
    python3 -m loracluster.ns_nodes_install
    ```
