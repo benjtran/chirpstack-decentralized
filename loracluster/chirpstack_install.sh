@@ -1,63 +1,80 @@
-#!/bin/bash
+#!/bin/sh
 set -euo pipefail
 
-echo "Add ChirpStack APT Repository"
+echo "Updating apt repositories"
+apt-get update
 
-cat > /etc/apt/sources.list.d/chirpstack_4.list << EOF
-deb https://artifacts.chirpstack.io/packages/4.x/deb stable main
-EOF
+echo "Installing required packages"
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  bash \
+  curl \
+  gnupg \
+  postgresql-client \
+  postgresql \
+  mosquitto \
+  mosquitto-clients \
+  redis-server \
+  git \
+  build-essential \
+  cmake \
+  dos2unix \
+  wget \
+  sudo \
+  passwd
 
-curl --fail "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x1ce2afd36dbcca00" | \
-    gpg --dearmor --batch --yes | \
-    sudo tee /etc/apt/trusted.gpg.d/chirpstack_4.gpg > /dev/null
+echo "Ensure /run/postgresql directory exists and has proper permissions"
+mkdir -p /run/postgresql
+chown postgres:postgres /run/postgresql
 
-sudo apt update
+POSTGRES_DATA_DIR="/var/lib/postgresql/data"
 
-echo "Install Required Packages"
-sudo apt install --yes chirpstack chirpstack-gateway-bridge \
-    postgresql postgresql-client postgresql-contrib \
-    mosquitto mosquitto-clients redis \
-    git build-essential cmake libpthread-stubs0-dev dos2unix
+POSTGRES_DATA_DIR="/var/lib/postgresql/data"
+PG_VERSION_DIR=$(ls /usr/lib/postgresql)
+PG_BIN_DIR="/usr/lib/postgresql/${PG_VERSION_DIR}/bin"
 
-echo "Initialize PostgreSQL for ChirpStack"
-
-# Find installed PostgreSQL version by checking initdb paths
-PG_VERSION=$(ls /usr/lib/postgresql | grep -E '^[0-9]+' | sort -V | tail -1)
-
-if [ -z "$PG_VERSION" ]; then
-    echo "PostgreSQL not found. Please install PostgreSQL before running this script."
-    exit 1
-fi
-
-POSTGRES_DATA_DIR="/var/lib/postgresql/${PG_VERSION}/main"
-
-if [ -d "$POSTGRES_DATA_DIR" ] && [ "$(ls -A "$POSTGRES_DATA_DIR")" ]; then
-    echo "PostgreSQL data directory already initialized at $POSTGRES_DATA_DIR"
+echo "Initialize PostgreSQL data directory if needed"
+if [ ! -d "$POSTGRES_DATA_DIR" ] || [ -z "$(ls -A "$POSTGRES_DATA_DIR")" ]; then
+  echo "Initializing PostgreSQL database cluster..."
+  su - postgres -c "${PG_BIN_DIR}/initdb -D $POSTGRES_DATA_DIR --auth=trust"
 else
-    echo "Initializing PostgreSQL database cluster..."
-    su -l postgres -c "/usr/lib/postgresql/${PG_VERSION}/bin/initdb --pgdata='$POSTGRES_DATA_DIR' --auth='trust'"
+  echo "PostgreSQL data directory already initialized at $POSTGRES_DATA_DIR"
 fi
 
-echo "Enabling and starting PostgreSQL service..."
-systemctl enable postgresql --now
+echo "Stop any running PostgreSQL server"
+if pgrep -u postgres postgres >/dev/null; then
+  echo "PostgreSQL process found, stopping..."
+  su - postgres -c "${PG_BIN_DIR}/pg_ctl -D $POSTGRES_DATA_DIR stop -m fast"
+else
+  echo "No running PostgreSQL process found."
+fi
 
-# Create role if not exists
-su - postgres -c "psql -tc \"SELECT 1 FROM pg_roles WHERE rolname='chirpstack'\" | grep -q 1 || psql -c \"CREATE ROLE chirpstack WITH LOGIN PASSWORD 'chirpstack';\""
+echo "Remove stale lock files if any"
+rm -f /run/postgresql/.s.PGSQL.5432.lock
 
-# Create database if not exists
-su - postgres -c "psql -tc \"SELECT 1 FROM pg_database WHERE datname='chirpstack'\" | grep -q 1 || psql -c \"CREATE DATABASE chirpstack WITH OWNER chirpstack;\""
+echo "Start PostgreSQL server"
+su - postgres -c "${PG_BIN_DIR}/pg_ctl -D $POSTGRES_DATA_DIR -l /tmp/postgres.log start"
 
-# Create extension if not exists
-su - postgres -c "psql -d chirpstack -c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\""
+echo "Wait a moment for PostgreSQL to start"
+sleep 3
 
-echo "Enable ChirpStack"
-systemctl enable chirpstack --now
-sleep 2
+echo "Creating ChirpStack database role and database if not exist"
+sudo -u postgres bash -c 'cd /tmp && psql -tc "SELECT 1 FROM pg_roles WHERE rolname='\''chirpstack'\''" | grep -q 1 || psql -c "CREATE ROLE chirpstack WITH LOGIN PASSWORD '\''chirpstack'\'';"'
+sudo -u postgres bash -c 'cd /tmp && psql -tc "SELECT 1 FROM pg_database WHERE datname='\''chirpstack'\''" | grep -q 1 || psql -c "CREATE DATABASE chirpstack WITH OWNER chirpstack;"'
+sudo -u postgres bash -c 'cd /tmp && psql -d chirpstack -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;" || echo "pg_trgm extension not available or already installed"'
 
-echo "Setup Gateway Bridge"
+echo "Starting Redis server"
+service redis-server start
 
+echo "Starting Mosquitto server"
+mkdir -p /run/mosquitto
+chown mosquitto:mosquitto /run/mosquitto
+service mosquitto start
+
+echo "Starting ChirpStack (assuming binary available in PATH)"
+chirpstack &
+
+echo "Setup Gateway Bridge configuration"
 mkdir -p /etc/chirpstack-gateway-bridge/
-
 cat > /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge-basicstation.toml << EOF
 [general]
 log_level="info"
@@ -69,51 +86,28 @@ servers=["tcp://localhost:1883"]
 bind="127.0.0.1:3001"
 EOF
 
-mkdir -p /etc/systemd/system/chirpstack-gateway-bridge.service.d/
+echo "Starting ChirpStack Gateway Bridge"
+chirpstack-gateway-bridge --config /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge-basicstation.toml &
 
-cat > /etc/systemd/system/chirpstack-gateway-bridge.service.d/override.conf << EOF
-[Service]
-ExecStart=
-ExecStart=/usr/bin/chirpstack-gateway-bridge --config /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge-basicstation.toml
-EOF
+echo "Setting up Basic Station"
 
-systemctl daemon-reexec
-systemctl daemon-reload
-systemctl enable chirpstack-gateway-bridge --now
-
-echo "Configure Mosquitto MQTT Broker"
-
-mkdir -p /etc/mosquitto/conf.d/
-
-grep -qxF "include_dir /etc/mosquitto/conf.d/" /etc/mosquitto/mosquitto.conf || \
-echo "include_dir /etc/mosquitto/conf.d/" | tee -a /etc/mosquitto/mosquitto.conf
-
-cat > /etc/mosquitto/conf.d/local.conf << EOF
-listener 1883 0.0.0.0
-allow_anonymous true
-EOF
-
-systemctl enable mosquitto --now
-
-# TO DO
-echo "Setup Redundant Agent"
-
-echo "Setup Basic Station"
+if [ $# -lt 1 ]; then
+  echo "Usage: $0 <platform>"
+  exit 1
+fi
 
 PLATFORM="$1"
 CHIRPSTACK_HOST="127.0.0.1"
 CHIRPSTACK_PORT="3001"
-REGION="US915"
 BUILD_DIR="build-${PLATFORM}-std"
-BASICSTATION_DIR="/home/$(logname)/basicstation"
+BASICSTATION_DIR="/root/basicstation"
 
-echo "Cloning or Updating Basic Station repository"
 if [ -d "$BASICSTATION_DIR" ]; then
-    cd "$BASICSTATION_DIR"
-    git pull
+  cd "$BASICSTATION_DIR"
+  git pull
 else
-    git clone https://github.com/lorabasics/basicstation.git "$BASICSTATION_DIR"
-    cd "$BASICSTATION_DIR"
+  git clone https://github.com/lorabasics/basicstation.git "$BASICSTATION_DIR"
+  cd "$BASICSTATION_DIR"
 fi
 
 make clean || true
@@ -122,7 +116,7 @@ echo "Building for platform: $PLATFORM"
 CC=gcc AR=ar LD=ld make platform=$PLATFORM
 
 echo "Fixing permissions on build directory..."
-sudo chown -R "$(logname):$(logname)" "$BASICSTATION_DIR/$BUILD_DIR"
+chown -R root:root "$BASICSTATION_DIR/$BUILD_DIR"
 
 cd "$BASICSTATION_DIR/$BUILD_DIR/bin"
 
@@ -130,7 +124,7 @@ echo "Configuring Basic Station..."
 
 echo "ws://${CHIRPSTACK_HOST}:${CHIRPSTACK_PORT}" > tc.uri
 
-cat > station.conf <<EOF
+cat > station.conf << EOF
 {
   "radio_conf": {
     "lorawan_public": true,
@@ -147,4 +141,5 @@ echo "Starting Basic Station..."
 ./station &
 
 echo "SETUP COMPLETE"
-exit 0
+
+wait

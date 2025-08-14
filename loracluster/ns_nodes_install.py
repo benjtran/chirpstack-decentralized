@@ -6,15 +6,17 @@ import configparser
 import paramiko
 import socket
 
+from redundant_agent.redundant_agent import run_redundant_agent
+
 config = configparser.ConfigParser()
 config.read('loracluster/config.ini')
 
-def connect_ssh(host, username, password) -> paramiko.SSHClient | None:
+def connect_ssh(host, username, password, ssh_port) -> paramiko.SSHClient | None:
     try:
         print("Attempting connection to " + host)
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Automatically trust new hosts
-        client.connect(hostname=host, username=username, password=password, timeout=5)
+        client.connect(hostname=host, port=ssh_port, username=username, password=password, timeout=5)
         print("Success!")
         return client
     except socket.timeout:
@@ -27,16 +29,19 @@ def connect_ssh(host, username, password) -> paramiko.SSHClient | None:
         print(f"SSH connection failed: {e}")
     return None
 
-def connect_all_nodes() -> list:
+def load_nodes_config() -> list:
     connection_results = []
     for section in config.sections():
         if section != 'settings':
             host = config[section]["host"]
             username = config[section]["username"]
             password = config[section]["password"]
-            platform = config[section]["deveui"]
-            client = connect_ssh(host, username, password)
-            client_result = [host, client, password, platform]
+            platform = config[section]["platform"]
+            role = config[section]["role"]
+            name = config[section]["name"]
+            ssh_port = config[section]['ssh_port']
+            client = connect_ssh(host, username, password, ssh_port)
+            client_result = [host, client, password, platform, role, name, ssh_port]
             connection_results.append(client_result)
     return connection_results
 
@@ -54,65 +59,73 @@ def print_connect_results(results) -> None:
             failed+=1
     print(f"{success}/{success + failed} successfully connected")
 
-def install_components(connection_results):
+def install_components(connection_results) -> None:
     for result in connection_results:
         host = result[0]
         client = result[1]
         password = result[2]
         platform = result[3]
+        ssh_port = result[6]
         if client:
-            chan = client.invoke_shell()
-
-            local_script_path = "loracluster/chirpstack_install.sh"
             remote_script_path = "/tmp/chirpstack_install.sh"
+            local_script_path = "loracluster/chirpstack_install.sh"
 
-            # Fix line endings before upload
             with open(local_script_path, "rb") as f:
                 content = f.read().replace(b"\r\n", b"\n")
             with open(local_script_path, "wb") as f:
                 f.write(content)
 
-            # Upload script
+            # Upload the script
             sftp = client.open_sftp()
             sftp.put(local_script_path, remote_script_path)
             sftp.chmod(remote_script_path, 0o755)
             sftp.close()
 
-            # Invoke shell and prepare for remote execution
             chan = client.invoke_shell()
+
+            # Clear initial welcome text if any
+            while not chan.recv_ready():
+                pass
             chan.recv(1024)
 
-            # Optional: Convert again just in case
             chan.send(f"dos2unix {remote_script_path}\n")
+            while not chan.recv_ready():
+                pass
             chan.recv(1024)
 
-            # Run script
-            chan.send(f"sudo bash {remote_script_path} {platform}\n")
+            chan.send(f"bash {remote_script_path} {platform}\n")
 
             while True:
                 if chan.recv_ready():
-                    output = chan.recv(1024).decode()
-                    print(output)
+                    output = chan.recv(4096).decode()
+                    print(output, end="")
 
                     if "password" in output.lower():
-                        chan.send(password + '\n')
+                        chan.send(password + "\n")
 
                     if "setup complete" in output.lower():
-                        print(f"Finished installing components to {host}")
+                        print(f"\nFinished installing components on {ssh_port}")
                         break
-                
+
             chan.close()
             client.close()
+            
+def run_agent_on_master(connection_results) -> None:
+    for result in connection_results:
+        role = result[4]
+        name = result[5]
+        if "master" in role.lower():
+            run_redundant_agent(name)
  
 def main() -> int:
     """
     Main Function.
     """
     print("Testing connect SSH")
-    client = connect_ssh('102.199.1.20', 'ben', 'password123')
+    client = connect_ssh('102.199.1.20', '1883', 'ben', 'password123')
 
     print("Testing looping nodes")
-    connection_results = connect_all_nodes()
+    connection_results = load_nodes_config()
     print_connect_results(connection_results)
     continue_status = input("Would you like to continue? (Y/N)")
     if continue_status == "N":
@@ -120,6 +133,9 @@ def main() -> int:
 
     print("Testing component installation")
     install_components(connection_results)
+    
+    run_agent_on_master(connection_results)
+    
     return 0
 
 if __name__ == "__main__":
