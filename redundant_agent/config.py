@@ -44,6 +44,13 @@ def load_agent_config(simulate_node_name=None):
     keepalive = int(config["settings"].get("keepalive", 600))
 
     chirpstack_mqtt = config["settings"].get("chirpstack_mqtt", "127.0.0.1").strip()
+    if ":" in chirpstack_mqtt:
+        chirpstack_mqtt_host, chirpstack_mqtt_port = chirpstack_mqtt.split(":")
+        chirpstack_mqtt_host = chirpstack_mqtt_host.strip()
+        chirpstack_mqtt_port = int(chirpstack_mqtt_port.strip())
+    else:
+        chirpstack_mqtt_host = chirpstack_mqtt
+        chirpstack_mqtt_port = 1883
     redis_host = config["settings"].get("redis_host", "127.0.0.1").strip()
     uplink_topic = config["settings"].get("uplink_topic", "application/+/device/+/event/up").strip()
 
@@ -53,7 +60,8 @@ def load_agent_config(simulate_node_name=None):
         "deveui": deveui,
         "keepalive": keepalive,
         "mqtt_brokers": mqtt_brokers,
-        "chirpstack_mqtt": chirpstack_mqtt,
+        "chirpstack_mqtt_host": chirpstack_mqtt_host,
+        "chirpstack_mqtt_port": chirpstack_mqtt_port,
         "redis_host": redis_host,
         "uplink_topic": uplink_topic,
         "keepalive_topic": f"agent/keepalive/{name}"

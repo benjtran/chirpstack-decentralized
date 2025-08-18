@@ -7,7 +7,7 @@ from .master_election import am_i_master
 def forward_uplinks_to_chirpstack(config):
     r = Redis(host=config["redis_host"], port=6379)
     pub = mqtt.Client(protocol=mqtt.MQTTv5)
-    pub.connect(config["chirpstack_mqtt"])
+    pub.connect(config["chirpstack_mqtt_host"], port=config["chirpstack_mqtt_port"])
     pub.loop_start()
 
     print(f"[{config['name']}] Forwarder started. Listening to Redis stream 'uplinks'...")
