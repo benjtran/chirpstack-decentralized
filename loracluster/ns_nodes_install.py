@@ -49,13 +49,13 @@ def print_connect_results(results) -> None:
     success = 0
     failed = 0
     for result in results:
-        host = result[0]
+        name = result[5]
         client = result[1]
         if client:
-            print(host + " successfully connected")
+            print(name + " successfully connected")
             success+=1
         else:
-            print(host + " failed to connect")
+            print(name + " failed to connect")
             failed+=1
     print(f"{success}/{success + failed} successfully connected")
 
@@ -121,17 +121,17 @@ def main() -> int:
     """
     Main Function.
     """
-    print("Testing connect SSH")
-    client = connect_ssh('102.199.1.20', '1883', 'ben', 'password123')
-
-    print("Testing looping nodes")
+    print("Begin looping nodes")
     connection_results = load_nodes_config()
     print_connect_results(connection_results)
     continue_status = input("Would you like to continue? (Y/N)")
     if continue_status == "N":
         return 0
+    elif continue_status != "Y":
+        print("Invalid input, exiting.")
+        return 1
 
-    print("Testing component installation")
+    print("Component installation")
     install_components(connection_results)
     
     run_agent_on_master(connection_results)
