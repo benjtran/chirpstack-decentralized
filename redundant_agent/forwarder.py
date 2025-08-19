@@ -12,7 +12,10 @@ def forward_uplinks_to_chirpstack(config):
 
     print(f"[{config['name']}] Forwarder started. Listening to Redis stream 'uplinks'...")
 
-    last_id = "0"
+    # Get last ID in the stream to skip old messages
+    last_entry = r.xrevrange("uplinks", count=1)
+    last_id = last_entry[0][0].decode() if last_entry else "0"
+
     while True:
         entries = r.xread({"uplinks": last_id}, block=1000, count=1)
         if entries:
@@ -26,8 +29,8 @@ def forward_uplinks_to_chirpstack(config):
                     print(f"[MASTER] Forwarded uplink → {topic}: {payload}")
                 else:
                     print(f"[BACKUP] Skipped uplink → {topic}: {payload}")
-
-                last_id = msg_id
+                    
+                last_id = str(int(msg_id.decode().split('-')[0])) + '-' + str(int(msg_id.decode().split('-')[1]) + 1)
 
 
 if __name__ == "__main__":

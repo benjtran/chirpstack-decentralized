@@ -45,6 +45,17 @@ services:
     networks:
       - loranet
 
+  chirpstack:
+    image: chirpstack/chirpstack:latest
+    container_name: chirpstack
+    ports:
+      - "8080:8080"
+      - "1883:1883"
+    depends_on:
+      - redis
+    networks:
+      - loranet
+
 networks:
   loranet:
     driver: bridge
