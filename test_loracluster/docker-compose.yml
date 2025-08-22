@@ -1,41 +1,36 @@
-version: '3.9'
-
 services:
-  mosquitto1:
+  gateway-1:
     build: .
-    image: gw1-ssh  
     container_name: gw1
     ports:
       - "1884:1883"
       - "2221:22"     # SSH for 1
-    volumes:
-      - ./mqtt-brokers/broker1/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - "8081:8080"
     networks:
-      - loranet
+      loranet:
+        ipv4_address: 192.168.10.10
 
-  mosquitto2:
+  gateway-2:
     build: .
-    image: gw2-ssh
     container_name: gw2
     ports:
       - "1885:1883"
       - "2222:22"     # SSH for 2
-    volumes:
-      - ./mqtt-brokers/broker2/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - "8082:8080"
     networks:
-      - loranet
+      loranet:
+        ipv4_address: 192.168.10.11
 
-  mosquitto3:
+  gateway-3:
     build: .
-    image: gw3-ssh
     container_name: gw3
     ports:
       - "1886:1883"
       - "2223:22"     # SSH for 3
-    volumes:
-      - ./mqtt-brokers/broker3/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - "8083:8080"
     networks:
-      - loranet
+      loranet:
+        ipv4_address: 192.168.10.12
   
 networks:
   loranet:
