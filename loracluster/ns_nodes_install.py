@@ -100,7 +100,8 @@ def install_components(connection_results) -> None:
                 pass
             chan.recv(1024)
 
-            chan.send(f"bash {remote_script_path} {result["platform"]}\n")
+            platform = result["platform"]
+            chan.send(f"bash {remote_script_path} {platform}\n")
 
             while True:
                 if chan.recv_ready():
@@ -111,7 +112,8 @@ def install_components(connection_results) -> None:
                         chan.send(result["password"] + "\n")
 
                     if "setup complete" in output.lower():
-                        print(f"\nFinished installing components on {result["port"]}")
+                        port = result["port"]
+                        print(f"\nFinished installing components on {port}")
                         break
 
             chan.close()
