@@ -20,9 +20,4 @@ RUN ssh-keygen -A
 EXPOSE 22
 EXPOSE 8080
 
-WORKDIR /loracluster
-
-COPY loracluster/start.sh /start.sh
-RUN chmod +x /start.sh
-
-CMD ["/start.sh"]
+CMD ["/usr/sbin/sshd", "-D"]

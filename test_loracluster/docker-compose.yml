@@ -1,45 +1,33 @@
 services:
   gateway-1:
-    build:
-      context: ..
-      dockerfile: test_loracluster/Dockerfile
+    build: .
     container_name: gw1
     ports:
       - "1884:1883"
       - "2221:22"     # SSH for 1
       - "8081:8080"
-    volumes:
-      - ../loracluster:/loracluster
     networks:
       loranet:
         ipv4_address: 192.168.10.10
 
   gateway-2:
-    build:
-      context: ..
-      dockerfile: test_loracluster/Dockerfile
+    build: .
     container_name: gw2
     ports:
       - "1885:1883"
       - "2222:22"     # SSH for 2
       - "8082:8080"
-    volumes:
-      - ../loracluster:/loracluster
     networks:
       loranet:
         ipv4_address: 192.168.10.11
 
   gateway-3:
-    build:
-      context: ..
-      dockerfile: test_loracluster/Dockerfile
+    build: .
     container_name: gw3
     ports:
       - "1886:1883"
       - "2223:22"     # SSH for 3
       - "8083:8080"
-    volumes:
-      - ../loracluster:/loracluster
     networks:
       loranet:
         ipv4_address: 192.168.10.12
